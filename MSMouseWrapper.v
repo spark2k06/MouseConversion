@@ -4,7 +4,7 @@
 /*
 MIT License
 
-Copyright (c) 2022 Antonio Sánchez (@TheSonders)
+Copyright (c) 2022 Antonio SÃ¡nchez (@TheSonders)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -37,14 +37,13 @@ https://www.avrfreaks.net/sites/default/files/PS2%20Keyboard.pdf
 module MSMouseWrapper
 	#(parameter CLKFREQ=50_000_000)
 	(input wire clk,
-	inout wire ps2dta,
-	inout wire ps2clk,
+	input wire ps2dta_in,
+	input wire ps2clk_in,
+	output reg ps2dta_out,
+	output reg ps2clk_out,
 	input wire rts,
 	output reg rd=0
 	);
-
-assign ps2dta=(ps2dta_reg==0)?0:1'bZ;
-assign ps2clk=(ps2clk_reg==0)?0:1'bZ;
 
 localparam PS2BAUDRATE=15_000;
 localparam PS2PERIOD=(CLKFREQ/PS2BAUDRATE);
@@ -78,7 +77,7 @@ reg PS2R_PAR=0;
 reg [$clog2(PS2PERIOD)-1:0]PS2R_Counter=0;
 
 always @(posedge clk)begin
-	ps2clkbuf<={ps2clkbuf[2:0],ps2clk};
+	ps2clkbuf<={ps2clkbuf[2:0],ps2clk_in};
 	rtsbuf<={rtsbuf[2:0],rts};
 	if (PS2R_NewByte==1)PS2R_NewByte<=0;
 	
@@ -94,14 +93,14 @@ always @(posedge clk)begin
 		case (PS2R_STM)
 			`PS2R_Start:
 				begin
-					if (ps2dta==0)begin
+					if (ps2dta_in==0)begin
 						PS2R_STM<=PS2R_STM+1;
 						PS2R_PAR<=`PAR_EVEN;
 					end
 				end
 			`PS2R_Parity:
 				begin
-					if (ps2dta==PS2R_PAR)begin
+					if (ps2dta_in==PS2R_PAR)begin
 						PS2R_STM<=PS2R_STM+1;
 					end
 					else begin
@@ -110,7 +109,7 @@ always @(posedge clk)begin
 				end	
 			`PS2R_Stop:
 				begin
-					if (ps2dta==1)begin
+					if (ps2dta_in==1)begin
 						PS2R_STM<=PS2R_STM+1;
 						PS2R_Counter<=PS2PERIOD;
 					end
@@ -118,8 +117,8 @@ always @(posedge clk)begin
 				end
 			default:
 				begin
-					PS2R_Byte<={ps2dta,PS2R_Byte[7:1]};
-					PS2R_PAR<=PS2R_PAR^ps2dta;
+					PS2R_Byte<={ps2dta_in,PS2R_Byte[7:1]};
+					PS2R_PAR<=PS2R_PAR^ps2dta_in;
 					PS2R_STM<=PS2R_STM+1;
 				end
 		endcase
@@ -149,7 +148,7 @@ end
 `define PS2Pr_RESET		8'hFF
 `define PS2Pr_REMOTE		8'hF0
 `define PS2Pr_ACK			8'hFA
-`define PS2Pr_READ		8'hEB
+`define PS2Pr_EPS 		8'hF4
 
 `define PS2Pr_M			30'h39AFFFFF
 
@@ -194,8 +193,6 @@ reg [7:0]PS2Byte1=0;
 reg [7:0]PS2Byte2=0;
 reg [29:0]SerialSendData=0;
 
-reg ps2dta_reg=0; 	
-reg ps2clk_reg=0;
 reg [3:0]PS2Tr_STM=0;
 reg PS2Tr_PAR=0;
 
@@ -270,8 +267,8 @@ always @(posedge clk)begin
 			end
 			`PS2Pr_Query:begin
 				if (SerialSendRequest==0 && Serial_STM==0)begin
-					SendPS2(`PS2Pr_READ);
-					PS2Pr_STM<=PS2Pr_STM+1;
+					SendPS2(`PS2Pr_EPS);
+					PS2Pr_STM<=PS2Pr_STM+2; // Ignoramos ACK porque no se llega a recibir
 				end
 			end
 			`PS2Pr_Wait0:begin
@@ -300,7 +297,7 @@ always @(posedge clk)begin
 			end
 			`PS2Pr_Wait3:begin
 				if (PS2R_NewByte==1)begin
-					PS2Pr_STM<=`PS2Pr_Query;
+					PS2Pr_STM<=`PS2Pr_Wait1;
 					SerialSendRequest<=1;
 					if (XC!=0 || YC!=0 || LBut!=LeftBt || RBut!=RightBt || FUpdate==1) begin
 						SendSerial({1'b1,`MSMByte3,2'b01,`MSMByte2,2'b01,`MSMByte1,1'b0});
@@ -345,40 +342,40 @@ always @(posedge clk)begin
 ///////////////////////////////////////////
 	if (`RTSFALL && PS2Detected==1)begin
 		PS2Tr_STM<=0;
-		ps2dta_reg<=1; 			//Requerido para algunas CPLD
-		ps2clk_reg<=1;
+		ps2dta_out<=1; 			//Requerido para algunas CPLD
+		ps2clk_out<=1;
 	end
 	else begin
 	case (PS2Tr_STM)
 		`PS2Tr_Reset:begin
-			ps2dta_reg<=1; 		
-			ps2clk_reg<=1;
+			ps2dta_out<=1;
+			ps2clk_out<=1;
 			PS2Tr_STM<=PS2Tr_STM+1;
 		end
 		`PS2Tr_Idle:begin
 			if (PS2SendRequest==1)begin
-				ps2clk_reg<=0;
+				ps2clk_out<=0;
 				SetTimer(HUNDRED);
 				PS2Tr_STM<=PS2Tr_STM+1;
 			end
 		end
 		`PS2Tr_ClockLow:begin
 			if (`TMR_END)begin
-				ps2dta_reg<=`STARTBIT;
-				ps2clk_reg<=1;
+				ps2dta_out<=`STARTBIT;
+				ps2clk_out<=1;
 				PS2Tr_STM<=PS2Tr_STM+1;
 				PS2Tr_PAR<=`PAR_EVEN;
 			end
 		end
 		`PS2Tr_Parity:begin
 			if (`PS2CLKFALL)begin
-				ps2dta_reg<=PS2Tr_PAR;
+				ps2dta_out<=PS2Tr_PAR;
 				PS2Tr_STM<=PS2Tr_STM+1;
 			end
 		end
 		`PS2Tr_Stop:begin
 			if (`PS2CLKFALL)begin
-				ps2dta_reg<=`STOPBIT;
+				ps2dta_out<=`STOPBIT;
 				PS2Tr_STM<=PS2Tr_STM+1;
 			end
 		end
@@ -394,7 +391,7 @@ always @(posedge clk)begin
 		end
 		default:begin
 			if (`PS2CLKFALL)begin
-				{PS2SendData,ps2dta_reg}<={1'b1,PS2SendData};
+				{PS2SendData,ps2dta_out}<={1'b1,PS2SendData};
 				PS2Tr_PAR<=PS2Tr_PAR^PS2SendData[0];
 				PS2Tr_STM<=PS2Tr_STM+1;
 			end
