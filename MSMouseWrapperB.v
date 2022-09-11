@@ -272,6 +272,9 @@ always @(posedge clk)begin
 						PS2Pr_STM<=PS2Pr_STM+1;
 					end
 				end
+				else begin
+					PS2Pr_STM<=0;
+				end
 			end
 			`PS2Pr_Wait1:begin
 				if (PS2R_NewByte==1)begin
